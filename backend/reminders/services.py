@@ -1,10 +1,37 @@
 import io
 import json
+import logging
 from abc import ABC, abstractmethod
 
 from django.conf import settings
 
 from .models import MessageLog
+
+logger = logging.getLogger(__name__)
+
+# OpenWA's SendMediaMessageDto caps these (class-validator MaxLength). Exceeding
+# them fails validation with HTTP 400 before any file is transmitted, so the
+# document path trims to stay inside the contract instead of erroring.
+OPENWA_MAX_FILENAME = 255
+OPENWA_MAX_CAPTION = 1024
+
+def _log_openwa_response(operation, url, status_code, body):
+    """Log response metadata without recording potentially sensitive bodies."""
+    from urllib.parse import urlsplit
+
+    try:
+        response_data = json.loads(body) if body else None
+    except (TypeError, ValueError):
+        response_data = None
+    response_keys = sorted(response_data.keys()) if isinstance(response_data, dict) else []
+    logger.info(
+        'OpenWA %s -> HTTP %s (path=%s body_chars=%d response_keys=%s)',
+        operation,
+        status_code,
+        urlsplit(url).path,
+        len(body or ''),
+        response_keys,
+    )
 
 # Branded header prepended to every outgoing message.
 MSG_HEADER = (
@@ -225,7 +252,7 @@ class OpenWAProvider(WhatsAppProvider):
         return headers
 
     def _resolve_session_id(self):
-        """Resolve session name (like 'default') to its OpenWA session UUID."""
+        """Resolve session name (like 'drto' or 'default') to its OpenWA session UUID."""
         if self._cached_session_uuid:
             return self._cached_session_uuid
 
@@ -238,30 +265,42 @@ class OpenWAProvider(WhatsAppProvider):
             pass
 
         import requests
+        headers = self._get_headers()
         try:
-            res = requests.get(f'{self.server_url}/api/sessions', headers=self._get_headers(), timeout=5)
+            res = requests.get(f'{self.server_url}/api/sessions', params={'name': self.session_id}, headers=headers, timeout=5)
             if res.status_code == 200:
                 sessions = res.json()
-                for s in sessions:
-                    if s.get('name') == self.session_id:
-                        self._cached_session_uuid = s.get('id')
+                if isinstance(sessions, list):
+                    for s in sessions:
+                        if s.get('name') == self.session_id and s.get('id'):
+                            self._cached_session_uuid = s.get('id')
+                            return self._cached_session_uuid
+            
+            res_all = requests.get(f'{self.server_url}/api/sessions', headers=headers, timeout=5)
+            if res_all.status_code == 200:
+                sessions = res_all.json()
+                if isinstance(sessions, list):
+                    for s in sessions:
+                        if s.get('name') == self.session_id and s.get('id'):
+                            self._cached_session_uuid = s.get('id')
+                            return self._cached_session_uuid
+                    if sessions and sessions[0].get('id'):
+                        self._cached_session_uuid = sessions[0].get('id')
                         return self._cached_session_uuid
-                if sessions:
-                    self._cached_session_uuid = sessions[0].get('id')
+
+            create_res = requests.post(
+                f'{self.server_url}/api/sessions',
+                json={'name': self.session_id},
+                headers=headers,
+                timeout=5,
+            )
+            if create_res.status_code in (200, 201):
+                data = create_res.json()
+                if isinstance(data, dict) and data.get('id'):
+                    self._cached_session_uuid = data.get('id')
                     return self._cached_session_uuid
-                
-                # Auto-create if not exists
-                create_res = requests.post(
-                    f'{self.server_url}/api/sessions',
-                    json={'name': self.session_id},
-                    headers=self._get_headers(),
-                    timeout=5,
-                )
-                if create_res.status_code in (200, 201):
-                    self._cached_session_uuid = create_res.json().get('id')
-                    return self._cached_session_uuid
-        except Exception:
-            pass
+        except Exception as err:
+            logger.warning('OpenWA _resolve_session_id error: %s', err)
 
         return self.session_id
 
@@ -274,11 +313,17 @@ class OpenWAProvider(WhatsAppProvider):
                 msg = err_data.get('message') or err_data.get('error') or str(exc)
                 if isinstance(msg, list):
                     msg = '; '.join(msg)
-                if 'not active' in msg.lower() or 'not started' in msg.lower() or 'qr' in msg.lower():
-                    return f"WhatsApp is not connected ({msg}). Open http://localhost:2785 and scan QR code."
+                msg_lower = msg.lower()
+                connection_keywords = [
+                    'not active', 'not started', 'qr', 'session closed', 'closed',
+                    'disconnected', 'evaluation failed', 'internal server error',
+                ]
+                if any(kw in msg_lower for kw in connection_keywords):
+                    return f"WhatsApp is not connected ({msg}). Please open http://localhost:2785, start session 'drto', and scan the QR code."
                 return f"OpenWA error: {msg}"
             except Exception:
                 pass
+            return f"OpenWA error (HTTP {exc.response.status_code}): {exc.response.text or str(exc)}"
         return str(exc)
 
     def send_message(self, to_number, message):
@@ -298,43 +343,144 @@ class OpenWAProvider(WhatsAppProvider):
             if response.status_code == 404:
                 fallback_url = f'{self.server_url}/api/send-message'
                 response = requests.post(fallback_url, json=payload, headers=headers, timeout=15)
-            response.raise_for_status()
+            if not response.ok:
+                try:
+                    response.raise_for_status()
+                except requests.exceptions.HTTPError as http_err:
+                    detail = self._format_error(http_err)
+                except Exception as exc:
+                    detail = str(exc)
+                else:
+                    detail = response.text
+                raise RuntimeError(f'OpenWA HTTP {response.status_code}: {detail}')
             return response.json()
         except Exception as exc:
+            if isinstance(exc, RuntimeError):
+                raise
             raise RuntimeError(self._format_error(exc)) from exc
 
     def upload_media(self, file_bytes, filename, mime_type):
-        """Encodes file bytes into a base64 Data URL string to pass to send_document."""
-        b64_data = base64.b64encode(file_bytes).decode('utf-8')
-        return f"data:{mime_type};base64,{b64_data}"
+        """Returns RAW base64 for the ``base64`` field of send-document.
+
+        OpenWA's SendMediaMessageDto documents ``base64`` as plain base64
+        encoded media data. The gateway does tolerate a ``data:<mime>;base64,``
+        prefix (it strips it via stripBase64DataUri), but emitting the
+        documented raw form keeps us aligned with the contract and avoids
+        re-wrapping on every send.
+        """
+        logger.info(
+            'OpenWA upload_media: encoding %s (%s, %d bytes) as base64',
+            filename, mime_type, len(file_bytes),
+        )
+        return base64.b64encode(file_bytes).decode('utf-8')
+
+    def _resolve_document_session(self):
+        """Choose a live OpenWA session for document sends only."""
+        import requests
+
+        try:
+            response = requests.get(
+                f'{self.server_url}/api/sessions',
+                headers=self._get_headers(),
+                timeout=5,
+            )
+            response.raise_for_status()
+            sessions = response.json()
+        except Exception as exc:
+            logger.warning('OpenWA document session lookup failed (%s)', type(exc).__name__)
+            raise RuntimeError('Unable to verify a connected OpenWA session for document sending.') from exc
+
+        if not isinstance(sessions, list):
+            raise RuntimeError('OpenWA returned an invalid session list for document sending.')
+
+        def is_ready(session):
+            return (
+                isinstance(session, dict)
+                and session.get('engineLoaded') is True
+                and str(session.get('status', '')).lower() == 'ready'
+            )
+
+        configured = str(self.session_id)
+        matches = [
+            session for session in sessions
+            if isinstance(session, dict)
+            and (str(session.get('id', '')) == configured or str(session.get('name', '')) == configured)
+            and is_ready(session)
+        ]
+        selected = next((session for session in matches if str(session.get('id', '')) == configured), None)
+        if selected is None and len(matches) == 1:
+            selected = matches[0]
+
+        if selected is None:
+            ready_sessions = [session for session in sessions if is_ready(session)]
+            if len(ready_sessions) == 1:
+                selected = ready_sessions[0]
+            elif len(ready_sessions) > 1:
+                raise RuntimeError(
+                    'Multiple OpenWA sessions are connected; configure OPENWA_SESSION_ID to a session name or UUID.'
+                )
+            else:
+                raise RuntimeError('No ready OpenWA session is available for document sending.')
+
+        session_id = str(selected.get('id', ''))
+        if not session_id:
+            raise RuntimeError('OpenWA returned a connected session without an ID.')
+
+        logger.info(
+            'OpenWA document session selected: name=%s id=%s status=%s engine_loaded=true',
+            selected.get('name', ''),
+            session_id,
+            selected.get('status', ''),
+        )
+        return session_id
 
     def send_document(self, to_number, media_id, caption, filename):
         import requests
 
-        session_id = self._resolve_session_id()
+        session_id = self._resolve_document_session()
         chat_id = self._clean_phone(to_number)
         url = f'{self.server_url}/api/sessions/{session_id}/messages/send-document'
 
-        file_data = media_id if media_id.startswith('data:') else f"data:application/pdf;base64,{media_id}"
+        # upload_media() hands back raw base64. Tolerate a data-URL prefix so a
+        # caller passing an already-wrapped value still produces a valid body.
+        if isinstance(media_id, str) and media_id.startswith('data:'):
+            _, _, media_id = media_id.partition(',')
 
         payload = {
             'chatId': chat_id,
-            'base64': file_data,
+            'base64': media_id,
             'mimetype': 'application/pdf',
-            'filename': filename,
-            'caption': caption,
+            'filename': (filename or 'receipt.pdf')[:OPENWA_MAX_FILENAME],
+            'caption': (caption or '')[:OPENWA_MAX_CAPTION],
         }
+
+        logger.info(
+            'OpenWA send-document: session=%s chat=%s mime=%s filename=%r '
+            'base64_chars=%d caption_chars=%d',
+            session_id, chat_id, payload['mimetype'], payload['filename'],
+            len(payload['base64']), len(payload['caption']),
+        )
 
         headers = self._get_headers()
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=30)
-            if response.status_code == 404:
-                fallback_url = f'{self.server_url}/api/sessions/{session_id}/messages/send-file'
-                response = requests.post(fallback_url, json=payload, headers=headers, timeout=30)
-            response.raise_for_status()
-            return response.json()
         except Exception as exc:
+            logger.error('OpenWA send-document: transport failure path=%s error=%s', url, exc)
             raise RuntimeError(self._format_error(exc)) from exc
+
+        _log_openwa_response('send-document', url, response.status_code, response.text)
+
+        if not response.ok:
+            try:
+                response.raise_for_status()
+            except requests.exceptions.HTTPError as http_err:
+                detail = self._format_error(http_err)
+            except Exception as exc:
+                detail = str(exc)
+            else:
+                detail = response.text
+            raise RuntimeError(f'OpenWA HTTP {response.status_code}: {detail}')
+        return response.json()
 
 
 def get_whatsapp_provider():
@@ -393,6 +539,22 @@ def send_reminder(customer):
             provider_response=str(exc),
         )
         return log, False
+
+
+def _validate_pdf_bytes(pdf_bytes):
+    """Returns None when ``pdf_bytes`` is a usable PDF, else a short reason.
+
+    Checks the structural markers only - the '%PDF-' header and the '%%EOF'
+    trailer - which is enough to catch the empty/half-written buffers that
+    ReportLab can leave behind after a rendering error.
+    """
+    if not isinstance(pdf_bytes, (bytes, bytearray)) or not pdf_bytes:
+        return 'PDF buffer is empty'
+    if not pdf_bytes.startswith(b'%PDF-'):
+        return 'buffer does not start with a %PDF- header'
+    if b'%%EOF' not in pdf_bytes[-2048:]:
+        return 'PDF trailer (%%EOF) not found'
+    return None
 
 
 def send_receipt_via_whatsapp(receipt_type, receipt_id):
@@ -465,9 +627,33 @@ def send_receipt_via_whatsapp(receipt_type, receipt_id):
     else:
         return False, 'Invalid receipt type.'
 
+    # Verify the rendered PDF before spending an OpenWA round-trip on it: an
+    # empty or malformed buffer would otherwise be base64-encoded and shipped
+    # as a corrupt "document" that WhatsApp cannot open.
+    invalid = _validate_pdf_bytes(pdf_bytes)
+    if invalid:
+        logger.error(
+            'send_receipt_via_whatsapp: refusing to send %s receipt %s - %s',
+            receipt_type, receipt_id, invalid,
+        )
+        return False, f'Receipt PDF could not be generated ({invalid}).'
+    logger.info(
+        'send_receipt_via_whatsapp: %s receipt %s -> valid PDF, %d bytes, '
+        'filename=%r, recipient=%s',
+        receipt_type, receipt_id, len(pdf_bytes), filename, phone,
+    )
+
     try:
         media_id = provider.upload_media(pdf_bytes, filename, 'application/pdf')
-        response = provider.send_document(phone, media_id, caption, filename)
+        provider.send_document(phone, media_id, caption, filename)
+        logger.info(
+            'send_receipt_via_whatsapp: %s receipt %s sent to %s as a document',
+            receipt_type, receipt_id, phone,
+        )
         return True, f'Receipt sent to {phone} successfully.'
     except Exception as exc:
+        logger.error(
+            'send_receipt_via_whatsapp: %s receipt %s to %s failed - %s',
+            receipt_type, receipt_id, phone, exc,
+        )
         return False, f'Failed to send receipt via WhatsApp: {exc}'
