@@ -5,6 +5,11 @@ from .models import Customer
 
 class CustomerFilter(django_filters.FilterSet):
     category = django_filters.ChoiceFilter(choices=Customer.Category.choices, method='filter_category')
+    is_broker = django_filters.BooleanFilter(field_name='is_broker')
+    broker_name = django_filters.CharFilter(field_name='broker_name', lookup_expr='icontains')
+    rto_name = django_filters.CharFilter(field_name='rto_name', lookup_expr='icontains')
+    city = django_filters.CharFilter(field_name='city', lookup_expr='icontains')
+    application_number = django_filters.CharFilter(field_name='application_number', lookup_expr='icontains')
     search = django_filters.CharFilter(method='filter_search')
     # Month-of-year range filters (1-12) on start_date, matching any year so
     # the All Customers page can show "everything entered between e.g. Jan and May".
@@ -13,7 +18,7 @@ class CustomerFilter(django_filters.FilterSet):
 
     class Meta:
         model = Customer
-        fields = ['category']
+        fields = ['category', 'is_broker']
 
     def filter_month_from(self, queryset, name, value):
         month = self._parse_month(value)
@@ -40,6 +45,9 @@ class CustomerFilter(django_filters.FilterSet):
         return queryset.filter(
             Q(name__icontains=value) | Q(contact_number__icontains=value)
             | Q(vehicle_number__icontains=value) | Q(reference_name__icontains=value)
+            | Q(broker_name__icontains=value) | Q(rto_name__icontains=value)
+            | Q(rto_agent_name__icontains=value) | Q(application_number__icontains=value)
+            | Q(city__icontains=value)
         )
 
     def filter_category(self, queryset, name, value):

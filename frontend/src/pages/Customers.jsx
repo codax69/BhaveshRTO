@@ -38,7 +38,8 @@ export default function Customers() {
   const [search, setSearch] = useState('');
   const [monthFrom, setMonthFrom] = useState('');
   const [monthTo, setMonthTo] = useState('');
-  const [remarksModal, setRemarksModal] = useState(null); // { customer, remarks, loading }
+
+  const [remarksModal, setRemarksModal] = useState(null);
   const [editingRemarkId, setEditingRemarkId] = useState(null);
   const [editingRemarkText, setEditingRemarkText] = useState('');
   const [savingRemark, setSavingRemark] = useState(false);
@@ -48,7 +49,7 @@ export default function Customers() {
   // Register the "Add Customer" action into the shared top bar
   useEffect(() => {
     setHeaderActions(
-      <button className="btn btn-primary" onClick={() => navigate('/customers/new')}>
+      <button className="btn btn-primary" onClick={() => navigate('/customers/new?type=standard')}>
         <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
@@ -59,8 +60,6 @@ export default function Customers() {
     return () => setHeaderActions(null);
   }, [setHeaderActions, navigate]);
 
-  // A reversed range (e.g. To=Mar, From=Jun) is swapped so the user still
-  // gets the span they meant instead of an empty result.
   const effectiveMonthRange = () => {
     let from = monthFrom;
     let to = monthTo;
@@ -83,11 +82,11 @@ export default function Customers() {
       const { from, to } = effectiveMonthRange();
       if (from) params.set('month_from', from);
       if (to) params.set('month_to', to);
+      params.set('is_broker', 'false');
       params.set('page_size', '10000');
       params.set('_refresh', Date.now().toString());
-      const res = await api.get('/customers', {
-        params,
-      });
+
+      const res = await api.get('/customers', { params });
       setCustomers(res.data.data);
     } catch {
       toast.error('Failed to load customers');
@@ -98,7 +97,6 @@ export default function Customers() {
         setRefreshing(false);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, monthFrom, monthTo]);
 
   useEffect(() => {
@@ -129,11 +127,9 @@ export default function Customers() {
     }
   };
 
-  // Exports exactly what the table is showing (search + month filtered set)
-  // to a real .xlsx workbook via SheetJS.
   const handleDownloadExcel = () => {
     if (customers.length === 0) {
-      toast.error('No records to download.');
+      toast.error('No customer records to download.');
       return;
     }
     const rows = customers.map((c) => ({
@@ -151,12 +147,8 @@ export default function Customers() {
       'Remarks Count': c.remarks_count || 0,
       'Latest Remark': c.latest_remark || '',
     }));
+
     const sheet = XLSX.utils.json_to_sheet(rows);
-    sheet['!cols'] = [
-      { wch: 26 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 18 },
-      { wch: 12 }, { wch: 12 }, { wch: 13 }, { wch: 13 }, { wch: 14 },
-      { wch: 14 }, { wch: 40 },
-    ];
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, 'Customers');
     const { from: exportFrom, to: exportTo } = effectiveMonthRange();
@@ -164,10 +156,9 @@ export default function Customers() {
       ? `-${MONTH_LABELS[Number(exportFrom || '1') - 1].slice(0, 3)}-${MONTH_LABELS[Number(exportTo || '12') - 1].slice(0, 3)}`
       : '';
     XLSX.writeFile(book, `customers${monthPart}-${new Date().toISOString().slice(0, 10)}.xlsx`);
-    toast.success(`Downloaded ${rows.length} record${rows.length !== 1 ? 's' : ''}.`);
+    toast.success(`Downloaded ${rows.length} customer record${rows.length !== 1 ? 's' : ''}.`);
   };
 
-  // Opens a modal with this customer's remarks instead of navigating away
   const openRemarks = async (c) => {
     setEditingRemarkId(null);
     setRemarksModal({ customer: c, remarks: [], loading: true });
@@ -210,9 +201,9 @@ export default function Customers() {
 
   return (
     <div className="app-content">
-      {/* Filters */}
+      {/* Filters Bar */}
       <div className="card" style={{ marginBottom: 20 }}>
-        <div className="card-body" style={{ padding: '14px 20px', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <div className="card-body" style={{ padding: '14px 20px', display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <input
             className="form-control"
             style={{ maxWidth: 280 }}
@@ -220,6 +211,7 @@ export default function Customers() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+
           <select
             className="form-control"
             style={{ maxWidth: 140 }}
@@ -231,6 +223,7 @@ export default function Customers() {
               <option key={label} value={index + 1}>{label}</option>
             ))}
           </select>
+
           <select
             className="form-control"
             style={{ maxWidth: 140 }}
@@ -242,6 +235,7 @@ export default function Customers() {
               <option key={label} value={index + 1}>{label}</option>
             ))}
           </select>
+
           {!(monthFrom === '1' && monthTo === '12') ? (
             <button
               className="btn btn-ghost"
@@ -261,15 +255,17 @@ export default function Customers() {
               Full Year ✕
             </button>
           )}
+
           <span style={{ alignSelf: 'center', fontSize: 13, color: '#64748b' }}>
-            {customers.length} record{customers.length !== 1 ? 's' : ''}
+            {customers.length} customer record{customers.length !== 1 ? 's' : ''}
           </span>
+
           <button
             className="btn btn-primary"
             style={{ marginLeft: 'auto' }}
             onClick={handleDownloadExcel}
             disabled={loading || customers.length === 0}
-            title="Download the currently filtered table as Excel"
+            title="Download currently filtered table as Excel"
           >
             <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -292,7 +288,7 @@ export default function Customers() {
             <svg width="56" height="56" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
             </svg>
-            <h3>No customers yet</h3>
+            <h3>No customer records yet</h3>
             <p>Click "Add Customer" to create your first record.</p>
           </div>
         ) : (
@@ -320,17 +316,17 @@ export default function Customers() {
                     <td>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                         {(c.categories?.length ? c.categories : [c.category]).map((category) => (
-                          <span key={category} className={`badge ${CATEGORY_COLORS[category]}`}>
-                            {CATEGORY_LABELS[category]}
+                          <span key={category} className={`badge ${CATEGORY_COLORS[category] || 'badge-info'}`}>
+                            {CATEGORY_LABELS[category] || category}
                           </span>
                         ))}
                       </div>
                     </td>
                     <td>{c.vehicle_number || '—'}</td>
                     <td>{c.end_date ? new Date(c.end_date).toLocaleDateString('en-IN') : '—'}</td>
-                    <td>₹{parseFloat(c.amount_total).toLocaleString('en-IN')}</td>
-                    <td style={{ color: '#059669' }}>₹{parseFloat(c.amount_paid).toLocaleString('en-IN')}</td>
-                    <td style={{ color: parseFloat(c.amount_pending) > 0 ? '#d97706' : '#059669', fontWeight: 600 }}>
+                    <td>₹{parseFloat(c.amount_total || 0).toLocaleString('en-IN')}</td>
+                    <td style={{ color: '#059669' }}>₹{parseFloat(c.amount_paid || 0).toLocaleString('en-IN')}</td>
+                    <td style={{ color: parseFloat(c.amount_pending) > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>
                       ₹{parseFloat(c.amount_pending || 0).toLocaleString('en-IN')}
                     </td>
                     <td>
@@ -339,7 +335,7 @@ export default function Customers() {
                           className="btn btn-ghost btn-sm"
                           onClick={() => openRemarks(c)}
                           title="View remarks"
-                          style={{ width: 200, whiteSpace: 'normal', textAlign: 'left', justifyContent: 'flex-start' }}
+                          style={{ width: 180, whiteSpace: 'normal', textAlign: 'left', justifyContent: 'flex-start' }}
                         >
                           <span className="badge badge-warning" style={{ fontSize: 10, padding: '1px 6px' }}>{c.remarks_count}</span>
                           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical' }}>

@@ -148,6 +148,8 @@ def generate_pdf_receipt(customer, payments, total_paid, total_pending, admin_na
                                 textColor=colors.white, leading=22)
     brand_tag = ParagraphStyle('BrandTag', fontName=REGULAR_FONT, fontSize=9.5,
                                textColor=colors.HexColor('#cbd5e1'), leading=13)
+    brand_phone = ParagraphStyle('BrandPhone', fontName=BOLD_FONT, fontSize=10,
+                                 textColor=GOLD, leading=13)
     receipt_title = ParagraphStyle('ReceiptTitle', fontName=BOLD_FONT, fontSize=13,
                                    textColor=GOLD, alignment=TA_RIGHT, leading=16)
     receipt_meta = ParagraphStyle('ReceiptMeta', fontName=REGULAR_FONT, fontSize=8.5,
@@ -166,6 +168,7 @@ def generate_pdf_receipt(customer, payments, total_paid, total_pending, admin_na
             [
                 Paragraph('Bhavesh Solanki', brand_name),
                 Paragraph('RTO &amp; Insurance Advisor', brand_tag),
+                Paragraph('+91 8866787500', brand_phone),
             ],
             [
                 Paragraph('PAYMENT RECEIPT', receipt_title),
@@ -371,6 +374,8 @@ def generate_manual_pdf_receipt(form_data, admin_name='Bhavesh Solanki'):
                                 textColor=colors.white, leading=22)
     brand_tag = ParagraphStyle('BrandTag', fontName=REGULAR_FONT, fontSize=9.5,
                                textColor=colors.HexColor('#cbd5e1'), leading=13)
+    brand_phone = ParagraphStyle('BrandPhone', fontName=BOLD_FONT, fontSize=10,
+                                 textColor=GOLD, leading=13)
     receipt_title = ParagraphStyle('ReceiptTitle', fontName=BOLD_FONT, fontSize=13,
                                    textColor=GOLD, alignment=TA_RIGHT, leading=16)
     receipt_meta = ParagraphStyle('ReceiptMeta', fontName=REGULAR_FONT, fontSize=8.5,
@@ -389,6 +394,7 @@ def generate_manual_pdf_receipt(form_data, admin_name='Bhavesh Solanki'):
             [
                 Paragraph('Bhavesh Solanki', brand_name),
                 Paragraph('RTO &amp; Insurance Advisor', brand_tag),
+                Paragraph('+91 8866787500', brand_phone),
             ],
             [
                 Paragraph('PAYMENT RECEIPT', receipt_title),

@@ -20,6 +20,12 @@ class Customer(models.Model):
         TAX = 'tax', 'Tax'
         FITNESS_PUC = 'fitness_puc', 'Fitness / PUC'  # legacy combined value
         LICENSE = 'license', 'License'
+        BROKER = 'broker', 'Broker'
+        TRANSFER = 'transfer', 'Transfer'
+        HPT = 'hpt', 'HPT'
+        HPA = 'hpa', 'HPA'
+        ODIT = 'odit', 'Audit'
+        OTHER = 'other', 'Other'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=150)
@@ -33,6 +39,17 @@ class Customer(models.Model):
     reference_name = models.CharField(max_length=150, blank=True, null=True)
     start_date = models.DateField(blank=True, null=True)
     end_date = models.DateField(blank=True, null=True, db_index=True)
+
+    # Broker fields
+    is_broker = models.BooleanField(default=False, db_index=True)
+    broker_name = models.CharField(max_length=150, blank=True, null=True, db_index=True)
+    rto_name = models.CharField(max_length=150, blank=True, null=True)
+    rto_agent_name = models.CharField(max_length=150, blank=True, null=True)
+    application_number = models.CharField(max_length=100, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    case_type = models.CharField(max_length=20, blank=True, null=True)  # mobile_otp | aadhar_otp
+    date_of_work = models.DateField(blank=True, null=True)
+
     amount_total = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
     # Cached/derived — always recomputed from Payment rows via recompute_amount_paid().
     # Never accept this as writable input on any endpoint.
@@ -47,6 +64,8 @@ class Customer(models.Model):
             models.Index(fields=['category']),
             models.Index(fields=['end_date']),
             models.Index(fields=['contact_number']),
+            models.Index(fields=['is_broker']),
+            models.Index(fields=['broker_name']),
         ]
         ordering = ['-created_at']
 

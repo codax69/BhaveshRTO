@@ -446,7 +446,7 @@ export default function Receipts() {
                     <td style={{ fontSize: 13, color: '#475569', fontFamily: 'monospace', fontWeight: 700 }}>{c.vehicle_number || '—'}</td>
                     <td style={{ textAlign: 'right', fontWeight: 500 }}>&#8377;{parseFloat(c.amount_total).toLocaleString('en-IN')}</td>
                     <td style={{ textAlign: 'right', color: '#059669', fontWeight: 600 }}>&#8377;{parseFloat(c.amount_paid).toLocaleString('en-IN')}</td>
-                    <td style={{ textAlign: 'right', color: parseFloat(c.amount_pending) > 0 ? '#d97706' : '#059669', fontWeight: 600 }}>
+                        <td style={{ textAlign: 'right', color: parseFloat(c.amount_pending) > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>
                       &#8377;{parseFloat(c.amount_pending).toLocaleString('en-IN')}
                     </td>
                     <td style={{ textAlign: 'center' }}>

@@ -26,7 +26,7 @@ export default function Remarks() {
     try {
       const [remarksRes, customersRes] = await Promise.all([
         api.get('/remarks'),
-        api.get('/customers', { params: { page_size: '10000' } }),
+        api.get('/customers', { params: { is_broker: 'false', page_size: '10000' } }),
       ]);
       setRemarks(remarksRes.data.data);
       setCustomers(customersRes.data.data);
@@ -108,7 +108,9 @@ export default function Remarks() {
 
   const customerMap = new Map(customers.map((c) => [c.id, c]));
 
+  // Strictly filter remarks so only standard customer remarks are shown
   const filtered = remarks.filter((r) => {
+    if (!customerMap.has(r.customer)) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (

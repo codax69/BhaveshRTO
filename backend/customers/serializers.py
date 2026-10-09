@@ -20,6 +20,8 @@ class BaseCustomerSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'contact_number', 'category', 'vehicle_number',
             'categories', 'service_details', 'reference_name',
+            'is_broker', 'broker_name', 'rto_name', 'rto_agent_name',
+            'application_number', 'city', 'case_type', 'date_of_work',
             'start_date', 'end_date', 'amount_total', 'amount_paid', 'amount_pending',
             'notes', 'needs_reminder', 'created_at', 'updated_at',
             'remarks_count', 'latest_remark',

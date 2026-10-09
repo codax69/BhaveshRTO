@@ -12,6 +12,7 @@ import VerifyEmail from './pages/VerifyEmail';
 import ChangePassword from './pages/ChangePassword';
 import Dashboard from './pages/Dashboard';
 import Customers from './pages/Customers';
+import Brokers from './pages/Brokers';
 import CategoryPage from './pages/CategoryPage';
 import Receipts from './pages/Receipts';
 import Remarks from './pages/Remarks';
@@ -98,6 +99,9 @@ function getPageHeader(pathname, adminName) {
   if (/^\/customers\/[^/]+\/edit$/.test(pathname)) {
     return { title: 'Edit Customer', subtitle: 'Update customer details and manage services.' };
   }
+  if (pathname.startsWith('/broker')) {
+    return { title: 'Broker Management', subtitle: 'Manage all broker customer entries, vehicle details, RTO agents, and services.' };
+  }
   if (pathname.startsWith('/customers')) {
     return { title: 'All Customers', subtitle: 'Manage all customer records across categories' };
   }
@@ -165,6 +169,11 @@ function AppRoutes() {
       <Route path="/customers" element={
         <ProtectedRoute>
           <AppLayout><Customers /></AppLayout>
+        </ProtectedRoute>
+      } />
+      <Route path="/broker" element={
+        <ProtectedRoute>
+          <AppLayout><Brokers /></AppLayout>
         </ProtectedRoute>
       } />
       <Route path="/customers/new" element={
